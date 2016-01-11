@@ -13,7 +13,7 @@
 使用示例：<br>
 <pre>
   miniGrid.Cells[4,1] := 'http://www.cnblogs.com/5207/';<br>
-  miniGrid.Cells[4,2] := '<A href="http://www.cnblogs.com/5207/">Click here</A>';<br>
+  miniGrid.Cells[4,2] := '<A href="http://www.cnblogs.com/5207/">Click here</ A>';<br>
 </pre>
   
 
