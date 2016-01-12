@@ -30,13 +30,14 @@ type
     FTitle: string;
     FFieldName: string;
     FWidth: Integer;
-    FSupportHtml: Boolean;
+    procedure SetFieldName(const Value: string);
+    procedure SetTitle(const Value: string);
+    procedure SetWidth(const Value: Integer);
   public
     constructor Create;
-    property Title: string read FTitle write FTitle;
-    property FieldName: string read FFieldName write FFieldName;
-    property Width: Integer read FWidth write FWidth;
-    property SupportHtml: Boolean read FSupportHtml write FSupportHtml;
+    property Title: string read FTitle write SetTitle;
+    property FieldName: string read FFieldName write SetFieldName;
+    property Width: Integer read FWidth write SetWidth;
   end;
 
   TColumns = class(TObjectList)
@@ -91,7 +92,6 @@ type
     FUrlCache: TStrings;
 
     procedure DoInitColumns;
-    procedure DoInitRows;
 
     procedure RepaintCell(c, r: integer);
     procedure Paint; override;
@@ -110,6 +110,9 @@ type
       ACol, ARow: Integer): TUrlCache;
     function GetUrlCacheKey(ACol, ARow: Integer): string;
     function FindUrlCache(ACol, ARow: Integer): TUrlCache;
+
+    //隐藏此属性，不让直接访问
+    property ColCount: Integer read GetColCount write SetColCount;
   protected
     procedure DrawColumn(ACol, ARow: Integer; ARect: TRect;
       AState: TGridDrawState);
@@ -120,13 +123,11 @@ type
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
 
-    //不让直接访问
-    property ColCount: Integer read GetColCount write SetColCount;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
-    procedure MergeCells(ACol, ARow, ARowSpan, AColSpan: Integer);
+    procedure MergeCells(ABaseCol, ABaseRow, ARowSpan, AColSpan: Integer);
 
     property Columns: TColumns read FColumns;
     property MergeInfos: TMergeInfos read FMergeInfos;
@@ -233,18 +234,14 @@ var
   i: Integer;
   objCol: TColumn;
 begin
-  for i := 1 to FColumns.Count - 1 do
+  for i := 0 to FColumns.Count - 1 do
   begin
     objCol := FColumns.Columns[i];
-    ColWidths[i] := objCol.Width;
-    Cols[i].Text := objCol.Title;
+    ColWidths[i+1] := objCol.Width;
+    Cols[i+1].Text := objCol.Title;
   end;
 end;
 
-procedure TMiniGrid.DoInitRows;
-begin
-
-end;
 
 function TMiniGrid.CellRect(c, r: Integer): TRect;
 var
@@ -293,7 +290,7 @@ var
   objUrlCache: TUrlCache;
   idx: Integer;
 begin
-  if Assigned(OnDrawCell) then
+  if Assigned(OnDrawCell) and not (gdFixed in AState) then
     OnDrawCell(Self, ACol, ARow, ARect, AState);
 
   sCellText := Cells[ACol, ARow];
@@ -303,6 +300,12 @@ begin
     objMI := FMergeInfos.FindBaseCell(ACol, ARow);
     if (objMI <> nil) and (objMI.PaintId <> FPaintID) then
     begin
+      if ((Selection.Left <= (objMI.Col+objMi.ColSpan)) and (Selection.Top <= (objMI.Row+objMI.RowSpan)))
+        and ((Selection.Left >= objMI.Row) and (Selection.Top >= objMI.Row)) then
+        AState := AState + [gdSelected]
+      else
+        AState := AState - [gdSelected];
+
       objMI.PaintId := FPaintID;
       DrawCell(objMI.Col, objMI.Row, ARect, AState);
     end;
@@ -371,14 +374,14 @@ begin
 end;
 
 
-procedure TMiniGrid.MergeCells(ACol, ARow, ARowSpan, AColSpan: Integer);
+procedure TMiniGrid.MergeCells(ABaseCol, ABaseRow, ARowSpan, AColSpan: Integer);
 var
   mergeInfo: TMergeInfo;
 begin
   mergeInfo := TMergeInfo.Create;
   FMergeInfos.Add(mergeInfo);
-  mergeInfo.Col := ACol;
-  mergeInfo.Row := ARow;
+  mergeInfo.Col := ABaseCol;
+  mergeInfo.Row := ABaseRow;
   mergeInfo.RowSpan := ARowSpan;
   mergeInfo.ColSpan := AColSpan;
 end;
@@ -465,7 +468,7 @@ end;
 /// <summary>
 ///  解析html格式<A>标签，如下所示
 ///   exmaple:
-///       <A href="http://www.tmssoftware.Com/minihtml.htm">Click here</A>
+///       <A href="http://www.cnblogs.com/5207/">Click here</A>
 /// </summary>
 /// <param name="ASrcText"></param>
 /// <returns></returns>
@@ -664,8 +667,8 @@ end;
 
 procedure TMiniGrid.SetColCount(const Value: Integer);
 begin
-//  inherited ColCount := Value+1;
-//  DoInitColumns;
+  inherited ColCount := Value+1;
+  DoInitColumns;
 end;
 
 function TMiniGrid.GetUrlCacheKey(ACol, ARow: Integer): string;
@@ -705,6 +708,7 @@ begin
     Error(@SListIndexError, AIndex);
 
   self.Delete(AIndex);
+  FOwnerGrid.DeleteColumn(AIndex+1);
 end;
 
 destructor TColumns.Destroy;
@@ -726,7 +730,21 @@ end;
 constructor TColumn.Create;
 begin
   FWidth := 100;
-  FSupportHtml := False;
+end;
+
+procedure TColumn.SetFieldName(const Value: string);
+begin
+  FFieldName := Value;
+end;
+
+procedure TColumn.SetTitle(const Value: string);
+begin
+  FTitle := Value;
+end;
+
+procedure TColumn.SetWidth(const Value: Integer);
+begin
+  FWidth := Value;
 end;
 
 { TMergeInfos }
