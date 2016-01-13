@@ -117,9 +117,6 @@ type
     //隐藏此属性，不让直接访问
     property ColCount: Integer read GetColCount write SetColCount;
   protected
-    procedure DrawColumn(ACol, ARow: Integer; ARect: TRect;
-      AState: TGridDrawState);
-
     procedure DrawCell(ACol, ARow: Longint; ARect: TRect;
       AState: TGridDrawState); override;
     function SelectCell(ACol, ARow: Longint): Boolean; override;
@@ -276,14 +273,6 @@ begin
   end;
 end;
 
-procedure TMiniGrid.DrawColumn(ACol, ARow: Integer; ARect: TRect;
-  AState: TGridDrawState);
-var
-  sCellText: string;  
-begin
-  sCellText := Cells[ACol, ARow];
-  DrawText(Canvas.Handle, PChar(sCellText), Length(sCellText), ARect, DT_WORDBREAK);
-end;
 
 procedure TMiniGrid.DrawCell(ACol, ARow: Integer; ARect: TRect;
   AState: TGridDrawState);
@@ -304,7 +293,7 @@ begin
     if (objMI <> nil) and (objMI.PaintId <> FPaintID) then
     begin
       if ((Selection.Left <= (objMI.Col+objMi.ColSpan)) and (Selection.Top <= (objMI.Row+objMI.RowSpan)))
-        and ((Selection.Left >= objMI.Row) and (Selection.Top >= objMI.Row)) then
+        and ((Selection.Left >= objMI.Col) and (Selection.Top >= objMI.Row)) then
         AState := AState + [gdSelected]
       else
         AState := AState - [gdSelected];
