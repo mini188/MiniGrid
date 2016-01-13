@@ -32,14 +32,20 @@ type
     FTitle: string;
     FFieldName: string;
     FWidth: Integer;
+    FFontColor: TColor;
+    FHeadBackgroundColor: TColor;
+    FFont: TFont;
     procedure SetFieldName(const Value: string);
     procedure SetTitle(const Value: string);
     procedure SetWidth(const Value: Integer);
   public
     constructor Create(AOwner: TColumns);
+    destructor Destroy; override;
     property Title: string read FTitle write SetTitle;
     property FieldName: string read FFieldName write SetFieldName;
     property Width: Integer read FWidth write SetWidth;
+    property Font: TFont read FFont write FFont;
+    property HeadBackgroundColor: TColor read FHeadBackgroundColor write FHeadBackgroundColor; 
   end;
 
   TColumns = class(TObjectList)
@@ -91,22 +97,24 @@ type
     FActiveColor: TColor;
     FPaintID: Integer;
     FOldCursor: TCursor;
-    FFixedFontColor: TColor;
     FUrlCache: TStrings;
+    FFixedFont: TFont;
 
     procedure DoInitColumns;
 
-    procedure RepaintCell(c, r: integer);
     procedure Paint; override;
-    procedure DoDrawText(const AText: string; ARect: TRect; AWordBreak: Boolean);
+    procedure RepaintCell(ACol, ARow: integer);
+    procedure DoDrawAxisLines(ARect: TRect; AState: TGridDrawState);
+    procedure DoDrawText(const AText: string; ARect: TRect; AWordBreak: Boolean); overload;
+    procedure DoDrawText(const AText: string; ACol, ARow: Integer; ARect: TRect; AWordBreak: Boolean); overload;
     procedure DoDrawUrlText(const AText: string; ARect: TRect);
-    procedure WMPaint(var Msg: TWMPAINT); message WM_PAINT;    
+    procedure WMPaint(var Msg: TWMPAINT); message WM_PAINT;
 
     function IsUrl(const AText: string): Boolean;
-    function CheckIsInURL(const X, Y: Integer): Boolean;
-    function CellRect(c, r: Integer): TRect;
-    function GetCellEx(c, r: Integer): String;
-    procedure SetCellEx(c, r: Integer; const Value: String);
+    function PtInUrlRange(const X, Y: Integer): Boolean;
+    function CellRect(ACol, ARow: Integer): TRect;
+    function GetCellEx(ACol, ARow: Integer): String;
+    procedure SetCellEx(ACol, ARow: Integer; const Value: String);
     function GetColCount: Integer;
     procedure SetColCount(const Value: Integer);
     function AnalysisUrl(const ASrcText: string;
@@ -133,16 +141,16 @@ type
     property MergeInfos: TMergeInfos read FMergeInfos;
     property ActiveColor: TColor read FActiveColor write FActiveColor default clHighlight;
     property PaintId: Integer read FPaintID;
-    property Cells[c,r: Integer]: String read GetCellEx write SetCellEx;
+    property Cells[ACol, ARow: Integer]: String read GetCellEx write SetCellEx;
   published
-    property FixedFontColor: TColor read FFixedFontColor write FFixedFontColor;
+    property FixedFont: TFont read FFixedFont write FFixedFont;
   end;
 
 implementation
 
 /// <summary>
 /// 字符串定位函数
-/// 摘自delphi xe版本代码，省略了asm部分
+/// 因为Delphi6及以下版本并不支持此函数，所以从delphi xe版本迁移代码，省略了asm部分
 /// </summary>
 function PosEx(const SubStr, S: string; Offset: Integer = 1): Integer;
 var
@@ -195,6 +203,8 @@ begin
   FDoubleBuffered := True;
   DefaultDrawing := False;
 
+  FFixedFont := TFont.Create;
+
   FColumns := TColumns.Create(Self);
   FMergeInfos := TMergeInfos.Create;
   FUrlCache := THashedStringList.Create;
@@ -202,17 +212,20 @@ begin
   FixedCols := 1;
   FixedRows := 1;
   RowCount := 2;
+  ColWidths[0] := 20;
 
   FActiveColor := clHighlight;
   FPaintID := 0;
   FOldCursor := Cursor;
-  FFixedFontColor := clWindowText;
 end;
 
 destructor TMiniGrid.Destroy;
 var
   i: integer;
 begin
+  if Assigned(FFixedFont) then
+    FreeAndNil(FFixedFont);
+
   if Assigned(FColumns) then
     FreeAndNil(FColumns);
 
@@ -243,47 +256,44 @@ begin
 end;
 
 
-function TMiniGrid.CellRect(c, r: Integer): TRect;
+function TMiniGrid.CellRect(ACol, ARow: Integer): TRect;
 var
   i: Integer;
   objMergeInfo: TMergeInfo;
   rc: TRect;
 begin
-  Result := inherited CellRect(c, r);
-  Result.Right := Result.Left + ColWidths[c];
-  Result.Bottom := Result.Top + RowHeights[r];
-  if FMergeInfos.IsMergeCell(c, r) then
+  Result := inherited CellRect(ACol, ARow);
+  Result.Right := Result.Left + ColWidths[ACol];
+  Result.Bottom := Result.Top + RowHeights[ARow];
+  if FMergeInfos.IsMergeCell(ACol, ARow) then
   begin
-    objMergeInfo := FMergeInfos.FindBaseCell(c, r);
+    objMergeInfo := FMergeInfos.FindBaseCell(ACol, ARow);
     if objMergeInfo <> nil then
     begin
       Result := inherited CellRect(objMergeInfo.Col, objMergeInfo.Row);
       for i := 1 to objMergeInfo.ColSpan do
       begin
-        rc := inherited CellRect(objMergeInfo.Col+i, r);
+        rc := inherited CellRect(objMergeInfo.Col+i, ARow);
         Result.Right := rc.Right;
       end;
 
       for i := 1 to objMergeInfo.RowSpan do
       begin
-        rc := inherited CellRect(c, objMergeInfo.Row+i);
+        rc := inherited CellRect(ACol, objMergeInfo.Row+i);
         Result.Bottom := rc.Bottom;
       end;
     end;
   end;
 end;
 
-
 procedure TMiniGrid.DrawCell(ACol, ARow: Integer; ARect: TRect;
   AState: TGridDrawState);
 var
   sCellText: string;
   objMI: TMergeInfo;
-  objUrlCache: TUrlCache;
   idx: Integer;
 begin
-  if Assigned(OnDrawCell) and not (gdFixed in AState) then
-    OnDrawCell(Self, ACol, ARow, ARect, AState);
+  Canvas.Font.Assign(Font);
 
   sCellText := Cells[ACol, ARow];
   if FMergeInfos.IsMergeCell(ACol, ARow) and not FMergeInfos.IsBaseCell(ACol, ARow) then
@@ -307,40 +317,38 @@ begin
   ARect := CellRect(ACol, ARow);
   if gdFixed in AState then
     Canvas.Brush.Color := FixedColor
+  else if gdSelected in AState then
+    Canvas.Brush.Color := FActiveColor
   else
     Canvas.Brush.Color := Color;
-  if gdSelected in AState then
-    Canvas.Brush.Color := FActiveColor;
 
   Canvas.Pen.Color := Canvas.Brush.Color;
   Canvas.Rectangle(ARect);
 
   if gdFixed in AState then
   begin
-    Canvas.Font.Color := FFixedFontColor;
+    Canvas.Font.Assign(FFixedFont);
     Canvas.Pen.Color := clGray;
     Canvas.Pen.Width := 1;
   end
   else
   begin
-    Canvas.Font.Color := Font.Color;
+    Canvas.Font.Assign(FColumns.Columns[ACol-1].Font);
     if GridLineWidth > 0 then
       Canvas.Pen.Color := clGray;
 
     Canvas.Pen.Width := GridLineWidth;
   end;
 
-  if IsUrl(sCellText) then
-  begin
-    objUrlCache := FindUrlCache(ACol, ARow);
-    if objUrlCache = nil then
-      objUrlCache := AnalysisUrl(sCellText, ACol, ARow);
+  if Assigned(OnDrawCell) then
+    OnDrawCell(Self, ACol, ARow, ARect, AState);
 
-    DoDrawUrlText(objUrlCache.Text, ARect);
-  end
-  else
-    DoDrawText(sCellText, ARect, True);
-  
+  DoDrawText(sCellText, ACol, ARow, ARect, True);
+  DoDrawAxisLines(ARect, AState);
+end;
+
+procedure TMiniGrid.DoDrawAxisLines(ARect: TRect; AState: TGridDrawState);
+begin
   if ((goHorzLine in Options) and not (gdFixed in AState)) or
      ((goFixedHorzLine in Options) and (gdFixed in AState)) then
   begin
@@ -362,7 +370,6 @@ begin
       Canvas.LineTo(ARect.Right, ARect.Top);
     end;
   end;
-
 end;
 
 
@@ -386,13 +393,13 @@ begin
   RepaintCell(ACol,ARow);
 end;
 
-procedure TMiniGrid.RepaintCell(c, r: integer);
+procedure TMiniGrid.RepaintCell(ACol, ARow: integer);
 var
   rc: TRect;
 begin
   if HandleAllocated Then 
   begin
-    rc := CellRect(c, r);
+    rc := CellRect(ACol, ARow);
     InvalidateRect(Handle, @rc, True);
   end;
 end;
@@ -410,19 +417,17 @@ end;
 /// <param name="AText"> 原始文本</param>
 /// <param name="ARect"> 内容矩形框</param>
 procedure TMiniGrid.DoDrawUrlText(const AText: string; ARect: TRect);
-var
-  oColor: TColor;
 begin
   if AText = '' then
     Exit;
-  oColor := Canvas.Font.Color;
+
   Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
   Canvas.Font.Color := clBlue;
 
   DrawText(Canvas.Handle, PChar(AText), Length(AText), ARect, DT_WORDBREAK or DT_END_ELLIPSIS);
 
   Canvas.Font.Style := Canvas.Font.Style - [fsUnderline];
-  Canvas.Font.Color := oColor;
+  Canvas.Font.Color := Font.Color;
 end;
 
 
@@ -497,7 +502,6 @@ begin
       StringReplace(sUrl, '"', '', [rfReplaceAll, rfIgnoreCase]);
       StringReplace(sUrl, '''', '', [rfReplaceAll, rfIgnoreCase]);
 
-
       Result.Url := sUrl;
     end;
 
@@ -514,7 +518,6 @@ begin
 
       Result.Text := sText;
     end;
-
   end
   else if IsUrl(ASrcText) then
   begin
@@ -526,7 +529,7 @@ begin
   FUrlCache.AddObject(GetUrlCacheKey(ACol, ARow), Result);
 end;
 
-function TMiniGrid.CheckIsInURL(const X, Y: Integer): Boolean;
+function TMiniGrid.PtInUrlRange(const X, Y: Integer): Boolean;
 var
   gc: TGridCoord;
   sData: String;
@@ -558,7 +561,7 @@ end;
 procedure TMiniGrid.MouseMove(Shift: TShiftState; X, Y: Integer);
 begin
   inherited;
-  if CheckIsInURL(X, Y) then
+  if PtInUrlRange(X, Y) then
     Cursor := crHandPoint
   else
     Cursor := FOldCursor;
@@ -573,7 +576,7 @@ var
   objUrlCache: TUrlCache;
 begin
   inherited;
-  if CheckIsInURL(X, Y) then
+  if PtInUrlRange(X, Y) then
   begin
     gc := Self.MouseCoord(X, Y);
 
@@ -622,33 +625,33 @@ begin
   end;
 end;
 
-function TMiniGrid.GetCellEx(c, r: Integer): String;
+function TMiniGrid.GetCellEx(ACol, ARow: Integer): String;
 var
   objMI: TMergeInfo;
 begin
-  if FMergeInfos.IsMergeCell(c, r) then
+  if FMergeInfos.IsMergeCell(ACol, ARow) then
   begin
-    objMI := FMergeInfos.FindBaseCell(c, r);
+    objMI := FMergeInfos.FindBaseCell(ACol, ARow);
     Result := inherited Cells[objMI.Col, objMi.Row];
   end
   else
-    Result := inherited Cells[c, r];
+    Result := inherited Cells[ACol, ARow];
 end;
 
-procedure TMiniGrid.SetCellEx(c, r: Integer; const Value: String);
+procedure TMiniGrid.SetCellEx(ACol, ARow: Integer; const Value: String);
 var
   objMI: TMergeInfo;
 begin
-  if FMergeInfos.IsMergeCell(c, r) then
+  if FMergeInfos.IsMergeCell(ACol, ARow) then
   begin
-    objMI := FMergeInfos.FindBaseCell(c, r);
+    objMI := FMergeInfos.FindBaseCell(ACol, ARow);
     inherited Cells[objMI.Col, objMI.Row] := Value;
     if Assigned(Parent) then
-      RepaintCell(c,r);
+      RepaintCell(ACol, ARow);
   end
   else
   begin
-    inherited Cells[c,r] := Value;
+    inherited Cells[ACol, ARow] := Value;
   end;
 end;
 
@@ -660,6 +663,7 @@ end;
 procedure TMiniGrid.SetColCount(const Value: Integer);
 begin
   inherited ColCount := Value+1;
+
   DoInitColumns;
 end;
 
@@ -676,6 +680,24 @@ begin
   idx := FUrlCache.IndexOf(GetUrlCacheKey(ACol, ARow));
   if idx <> -1 then
     Result := TUrlCache(FUrlCache.Objects[idx]);
+end;
+
+
+procedure TMiniGrid.DoDrawText(const AText: string; ACol, ARow: Integer;
+  ARect: TRect; AWordBreak: Boolean);
+var
+  objUrlCache: TUrlCache;  
+begin
+  if IsUrl(AText) then
+  begin
+    objUrlCache := FindUrlCache(ACol, ARow);
+    if objUrlCache = nil then
+      objUrlCache := AnalysisUrl(AText, ACol, ARow);
+
+    DoDrawUrlText(objUrlCache.Text, ARect);
+  end
+  else
+    DoDrawText(AText, ARect, True);
 end;
 
 { TColumns }
@@ -728,6 +750,17 @@ constructor TColumn.Create(AOwner: TColumns);
 begin
   FOwner := AOwner;
   FWidth := 100;
+  FFontColor := clWindowText;
+  FHeadBackgroundColor := clWindow;
+  FFont := TFont.Create;
+end;
+
+destructor TColumn.Destroy;
+begin
+  inherited;
+
+  if Assigned(FFont) then
+    FreeAndNil(FFont);
 end;
 
 procedure TColumn.SetFieldName(const Value: string);
