@@ -16,6 +16,7 @@ uses
 
 type
   TMiniGrid = class;
+  TColumns = class;
 
   TUrlCache = class
     FullData: string;
@@ -27,6 +28,7 @@ type
 
   TColumn = class(TComponent)
   private
+    FOwner: TColumns;
     FTitle: string;
     FFieldName: string;
     FWidth: Integer;
@@ -34,7 +36,7 @@ type
     procedure SetTitle(const Value: string);
     procedure SetWidth(const Value: Integer);
   public
-    constructor Create;
+    constructor Create(AOwner: TColumns);
     property Title: string read FTitle write SetTitle;
     property FieldName: string read FFieldName write SetFieldName;
     property Width: Integer read FWidth write SetWidth;
@@ -50,6 +52,7 @@ type
 
     function AddColumn: TColumn;
     procedure DeleteColumn(AIndex: Integer);
+    procedure Changed;
 
     property Columns[Index: Integer]: TColumn read GetColumn;
   end;
@@ -690,9 +693,14 @@ end;
 
 function TColumns.AddColumn: TColumn;
 begin
-  Result := TColumn.Create;
+  Result := TColumn.Create(Self);
   Add(Result);
 
+  FOwnerGrid.ColCount := Count;
+end;
+
+procedure TColumns.Changed;
+begin
   FOwnerGrid.ColCount := Count;
 end;
 
@@ -727,24 +735,28 @@ end;
 
 { TColumn }
 
-constructor TColumn.Create;
+constructor TColumn.Create(AOwner: TColumns);
 begin
+  FOwner := AOwner;
   FWidth := 100;
 end;
 
 procedure TColumn.SetFieldName(const Value: string);
 begin
   FFieldName := Value;
+  FOwner.Changed;
 end;
 
 procedure TColumn.SetTitle(const Value: string);
 begin
   FTitle := Value;
+  FOwner.Changed;
 end;
 
 procedure TColumn.SetWidth(const Value: Integer);
 begin
   FWidth := Value;
+  FOwner.Changed;  
 end;
 
 { TMergeInfos }
