@@ -257,32 +257,43 @@ end;
 
 
 function TMiniGrid.CellRect(ACol, ARow: Integer): TRect;
+  function _CalcRect(c, r, spanx, spany: Integer): TRect;
+  var
+    i: Integer;
+  begin
+    if c < LeftCol then
+      c := LeftCol;
+    if r < TopRow then
+      r := TopRow;
+
+    Result := inherited CellRect(c, r);
+    for i := c+1 to (c+spanx) do
+      Result.Right := Result.Right + ColWidths[i];
+
+    if c+1 > (c+spanx) then
+      Result.Right := Result.Right
+    else
+      Result.Right := Result.Right + spanx*GridLineWidth;
+
+    for i := r+1 to (r+spany) do
+      Result.Bottom := Result.Bottom + RowHeights[i];
+
+    if r+1 > (r+spany) then
+      Result.Bottom := Result.Bottom
+    else
+      Result.Bottom := Result.Bottom + spany*GridLineWidth;
+  end;
+
 var
-  i: Integer;
   objMergeInfo: TMergeInfo;
-  rc: TRect;
 begin
-  Result := inherited CellRect(ACol, ARow);
-  Result.Right := Result.Left + ColWidths[ACol];
-  Result.Bottom := Result.Top + RowHeights[ARow];
-  if FMergeInfos.IsMergeCell(ACol, ARow) then
+  if not FMergeInfos.IsMergeCell(ACol, ARow) then
+    Result := inherited CellRect(ACol, ARow)
+  else
   begin
     objMergeInfo := FMergeInfos.FindBaseCell(ACol, ARow);
     if objMergeInfo <> nil then
-    begin
-      Result := inherited CellRect(objMergeInfo.Col, objMergeInfo.Row);
-      for i := 1 to objMergeInfo.ColSpan do
-      begin
-        rc := inherited CellRect(objMergeInfo.Col+i, ARow);
-        Result.Right := rc.Right;
-      end;
-
-      for i := 1 to objMergeInfo.RowSpan do
-      begin
-        rc := inherited CellRect(ACol, objMergeInfo.Row+i);
-        Result.Bottom := rc.Bottom;
-      end;
-    end;
+      Result := _CalcRect(objMergeInfo.Col, objMergeInfo.Row, objMergeInfo.ColSpan, objMergeInfo.RowSpan);
   end;
 end;
 
@@ -291,7 +302,6 @@ procedure TMiniGrid.DrawCell(ACol, ARow: Integer; ARect: TRect;
 var
   sCellText: string;
   objMI: TMergeInfo;
-  idx: Integer;
 begin
   Canvas.Font.Assign(Font);
 
@@ -340,11 +350,15 @@ begin
     Canvas.Pen.Width := GridLineWidth;
   end;
 
+  DoDrawAxisLines(ARect, AState);
+  if TopRow <= ARow then
+  begin
+    InflateRect(ARect, -GridLineWidth, -GridLineWidth);
+    DoDrawText(sCellText, ACol, ARow, ARect, True);
+  end;
+
   if Assigned(OnDrawCell) then
     OnDrawCell(Self, ACol, ARow, ARect, AState);
-
-  DoDrawText(sCellText, ACol, ARow, ARect, True);
-  DoDrawAxisLines(ARect, AState);
 end;
 
 procedure TMiniGrid.DoDrawAxisLines(ARect: TRect; AState: TGridDrawState);
